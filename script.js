@@ -386,3 +386,376 @@ document.addEventListener('DOMContentLoaded', () => {
                                     ${getDeviceStatusBadge(device.status)}
                                 </div>
                                 <div class="space-y-2 text-sm">
+                                    <div><span class="font-medium">Type:</span> ${device.type}</div>
+                                    <div><span class="font-medium">Patient:</span> ${device.patientName}</div>
+                                    <div><span class="font-medium">Last Update:</span> ${device.lastUpdate}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        } else {
+             content = `<div class="border bg-card rounded-lg p-6 text-center"><h3 class="text-xl font-semibold">Content for ${capitalize(tabId)}</h3><p class="text-muted-foreground">This section is under construction.</p></div>`;
+        }
+        document.getElementById('tabs-content-container').innerHTML = content;
+        
+        // If the live monitoring tab is active, initialize charts
+        if (tabId === 'live-monitoring') {
+            initCharts();
+        }
+    }
+
+    // =================================================================================
+    // CHARTING LOGIC (Chart.js)
+    // =================================================================================
+
+    function createChart(canvasId, config) {
+        const ctx = document.getElementById(canvasId)?.getContext('2d');
+        if (ctx) {
+            // Destroy existing chart if it exists
+            if (charts[canvasId]) {
+                charts[canvasId].destroy();
+            }
+            charts[canvasId] = new Chart(ctx, config);
+        }
+    }
+    
+    function initCharts() {
+        const gridColor = state.theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+        const labelColor = state.theme === 'dark' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
+
+        const chartOptions = (unit) => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { ticks: { color: labelColor }, grid: { color: gridColor } },
+                y: { ticks: { color: labelColor }, grid: { color: gridColor } }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => `${context.raw} ${unit}`
+                    }
+                }
+            }
+        });
+        
+        // Heart Rate Chart
+        createChart('hr-chart', {
+            type: 'line',
+            data: {
+                labels: state.chartData.heartRate.map(d => d.time),
+                datasets: [{
+                    label: 'Heart Rate',
+                    data: state.chartData.heartRate.map(d => d.value),
+                    borderColor: '#ef4444',
+                    tension: 0.3,
+                }]
+            },
+            options: chartOptions('bpm')
+        });
+
+        // Temperature Chart
+        createChart('temp-chart', {
+            type: 'line',
+            data: {
+                labels: state.chartData.temperature.map(d => d.time),
+                datasets: [{
+                    label: 'Temperature',
+                    data: state.chartData.temperature.map(d => d.value),
+                    borderColor: '#f97316',
+                    tension: 0.3,
+                }]
+            },
+            options: chartOptions('°F')
+        });
+        
+        // Respiratory Rate Chart
+        createChart('resp-chart', {
+            type: 'line',
+            data: {
+                labels: state.chartData.respiratory.map(d => d.time),
+                datasets: [{
+                    label: 'Respiratory Rate',
+                    data: state.chartData.respiratory.map(d => d.value),
+                    borderColor: '#10b981',
+                    tension: 0.3,
+                }]
+            },
+            options: chartOptions('breaths/min')
+        });
+
+        // Blood Pressure Chart
+        createChart('bp-chart', {
+            type: 'line',
+            data: {
+                labels: state.chartData.bloodPressure.map(d => d.time),
+                datasets: [
+                    {
+                        label: 'Systolic',
+                        data: state.chartData.bloodPressure.map(d => d.systolic),
+                        borderColor: '#ef4444',
+                        tension: 0.3,
+                    },
+                    {
+                        label: 'Diastolic',
+                        data: state.chartData.bloodPressure.map(d => d.diastolic),
+                        borderColor: '#3b82f6',
+                        tension: 0.3,
+                    }
+                ]
+            },
+            options: { ...chartOptions('mmHg'), plugins: { legend: { display: true, labels: { color: labelColor } } } }
+        });
+
+        updateCurrentValues();
+    }
+    
+    function updateCharts() {
+        if (state.activeTab !== 'live-monitoring') return;
+        
+        const updateSingleChart = (chartId, data) => {
+            const chart = charts[chartId];
+            if (chart) {
+                chart.data.labels = data.map(d => d.time);
+                chart.data.datasets[0].data = data.map(d => d.value);
+                chart.update();
+            }
+        };
+
+        updateSingleChart('hr-chart', state.chartData.heartRate);
+        updateSingleChart('temp-chart', state.chartData.temperature);
+        updateSingleChart('resp-chart', state.chartData.respiratory);
+        
+        // Update Blood Pressure chart (multi-dataset)
+        const bpChart = charts['bp-chart'];
+        if (bpChart) {
+            bpChart.data.labels = state.chartData.bloodPressure.map(d => d.time);
+            bpChart.data.datasets[0].data = state.chartData.bloodPressure.map(d => d.systolic);
+            bpChart.data.datasets[1].data = state.chartData.bloodPressure.map(d => d.diastolic);
+            bpChart.update();
+        }
+
+        updateCurrentValues();
+    }
+
+    function updateCurrentValues() {
+        const hr = state.chartData.heartRate.slice(-1)[0];
+        const temp = state.chartData.temperature.slice(-1)[0];
+        const bp = state.chartData.bloodPressure.slice(-1)[0];
+        
+        const hrEl = document.getElementById('hr-chart-current');
+        if (hrEl) hrEl.innerHTML = `<div class="text-2xl font-bold text-red-500">${hr.value}</div><div class="text-sm text-muted-foreground">bpm</div>`;
+
+        const tempEl = document.getElementById('temp-chart-current');
+        if (tempEl) tempEl.innerHTML = `<div class="text-2xl font-bold text-orange-500">${temp.value}</div><div class="text-sm text-muted-foreground">°F</div>`;
+        
+        const bpEl = document.getElementById('bp-chart-current');
+        if (bpEl) bpEl.innerHTML = `<div class="text-2xl font-bold text-red-500">${bp.systolic}/${bp.diastolic}</div><div class="text-sm text-muted-foreground">mmHg</div>`;
+    }
+
+    // =================================================================================
+    // EVENT HANDLERS & BINDING
+    // =================================================================================
+
+    function attachEventListeners() {
+        // Use event delegation on the root element for performance
+        root.onclick = function(event) {
+            let target = event.target.closest('button');
+            if (!target) return;
+
+            // Login Page Listeners
+            if (target.id === 'theme-toggle-btn') handleToggleTheme();
+            if (target.matches('.login-tab-trigger')) handleLoginTabSwitch(target.dataset.tab);
+            if (target.id === 'login-submit-btn') handleLogin(target.dataset.type);
+
+            // Main App Listeners
+            if (target.id === 'logout-btn') handleLogout();
+            if (target.matches('.main-tab-trigger')) handleMainTabSwitch(target.dataset.tab);
+        };
+    }
+    
+    function handleToggleTheme() {
+        state.theme = state.theme === 'light' ? 'dark' : 'light';
+        localStorage.setItem('theme', state.theme);
+        applyTheme();
+        renderApp(); // Re-render to update button icon/text
+    }
+
+    function applyTheme() {
+        if (state.theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+        // Re-initialize charts if they exist to update colors
+        if (charts['hr-chart']) {
+            initCharts();
+        }
+    }
+    
+    function handleLoginTabSwitch(tabId) {
+        document.querySelectorAll('.login-tab-trigger').forEach(btn => {
+            btn.setAttribute('data-state', btn.dataset.tab === tabId ? 'active' : 'inactive');
+        });
+        document.getElementById('login-form-container').innerHTML = LoginForm(tabId);
+    }
+
+    function handleLogin(userType) {
+        const email = document.getElementById('email-input').value;
+        const password = document.getElementById('password-input').value;
+
+        if (!email || !password) {
+            alert('Please enter email and password.');
+            return;
+        }
+
+        const userNames = {
+            doctor: 'Dr. Smith', patient: 'John Doe',
+            vendor: 'TechCorp Rep', connexta: 'Admin User'
+        };
+        
+        state.user = {
+            email: email,
+            userType: userType,
+            name: userNames[userType] || 'User'
+        };
+
+        localStorage.setItem('connexta-user', JSON.stringify(state.user));
+        state.activeTab = 'dashboard';
+        renderApp();
+    }
+    
+    function handleLogout() {
+        state.user = null;
+        localStorage.removeItem('connexta-user');
+        renderApp();
+    }
+    
+    function handleMainTabSwitch(tabId) {
+        state.activeTab = tabId;
+        document.querySelectorAll('.main-tab-trigger').forEach(btn => {
+            if (btn.dataset.tab === tabId) {
+                btn.classList.add('bg-background', 'text-foreground', 'shadow-sm');
+            } else {
+                btn.classList.remove('bg-background', 'text-foreground', 'shadow-sm');
+            }
+        });
+        renderTabContent(tabId);
+    }
+    
+    // =================================================================================
+    // DATA SIMULATION (replicates useEffect with setInterval)
+    // =================================================================================
+
+    function startDataSimulation() {
+        setInterval(() => {
+            if (!state.user) return; // Don't run if logged out
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+            // Update chart data
+            const updateDataArray = (data, valueFn) => [...data.slice(1), { time: timeStr, value: valueFn() }];
+            
+            state.chartData.heartRate = updateDataArray(state.chartData.heartRate, () => Math.floor(Math.random() * 20) + 65);
+            state.chartData.temperature = updateDataArray(state.chartData.temperature, () => parseFloat((Math.random() * 2 + 98.0).toFixed(1)));
+            state.chartData.respiratory = updateDataArray(state.chartData.respiratory, () => Math.floor(Math.random() * 6) + 14);
+
+            state.chartData.bloodPressure = [
+                ...state.chartData.bloodPressure.slice(1),
+                { time: timeStr, systolic: Math.floor(Math.random() * 20) + 110, diastolic: Math.floor(Math.random() * 15) + 70 }
+            ];
+
+            // Update device vitals
+            state.devices = state.devices.map(device => {
+                if (device.status === 'online') {
+                    return {
+                        ...device,
+                        vitals: {
+                            ...device.vitals,
+                            heartRate: Math.floor(Math.random() * 20) + 65,
+                        },
+                        lastUpdate: 'Just now'
+                    };
+                }
+                return device;
+            });
+
+            // Update the UI with new data
+            updateDynamicUI();
+
+        }, 5000);
+    }
+
+    function updateDynamicUI() {
+        // Update overview stats
+        document.getElementById('online-devices-stat').innerText = state.devices.filter(d => d.status === 'online').length;
+        document.getElementById('active-alerts-stat').innerText = state.patients.filter(p => p.severity === 'high' || p.severity === 'critical').length;
+        
+        // Update device cards in the list
+        document.querySelectorAll('.device-last-update').forEach(el => {
+            const device = state.devices.find(d => d.id === el.dataset.id);
+            if (device) el.innerText = device.lastUpdate;
+        });
+        document.querySelectorAll('.device-hr').forEach(el => {
+            const device = state.devices.find(d => d.id === el.dataset.id);
+            if (device) el.innerText = `${device.vitals.heartRate} bpm`;
+        });
+
+        // Update charts if visible
+        updateCharts();
+    }
+
+
+    // =================================================================================
+    // MAIN RENDER FUNCTION
+    // =================================================================================
+    function renderApp() {
+        if (!state.user) {
+            root.innerHTML = LoginPage();
+            // Default to doctor tab on login screen
+            handleLoginTabSwitch('doctor');
+        } else {
+            root.innerHTML = AppShell();
+            // Set the active tab visually and render its content
+            handleMainTabSwitch(state.activeTab);
+        }
+        // Render all lucide icons after updating the DOM
+        lucide.createIcons();
+    }
+
+    // =================================================================================
+    // INITIALIZATION
+    // =================================================================================
+    function init() {
+        // Load theme from localStorage
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            state.theme = savedTheme;
+        } else {
+            state.theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        applyTheme();
+
+        // Load user from localStorage
+        const savedUser = localStorage.getItem('connexta-user');
+        if (savedUser) {
+            state.user = JSON.parse(savedUser);
+        }
+        
+        // Initial render
+        renderApp();
+        
+        // Attach all event listeners
+        attachEventListeners();
+
+        // Start the real-time data simulation
+        startDataSimulation();
+    }
+
+    // Run the application
+    init();
+});
